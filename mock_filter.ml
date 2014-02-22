@@ -47,6 +47,38 @@ struct
         Pervasives.print_string "\n"
         ) signatures
 
+   module TypeUtil =
+     struct
+        let type_in_module _loc module_name type_name =
+          Ast.TyId(_loc, (Ast.IdAcc (_loc, (Ast.IdUid (_loc, module_name)), (Ast.IdLid (_loc, type_name)))))
+
+        let create_tuple_type_from_string_list _loc types =
+          let () =if List.length types < 2 then
+            Pervasives.invalid_arg "need at least two arguments to create a tuple"
+          in
+          let ex_ids = List.map (fun s -> Ast.TyId (_loc, (Ast.IdLid (_loc, s)))) types in
+          let reversed_ex_ids = List.rev ex_ids in
+          let last = List.hd reversed_ex_ids in
+          let rest = List.tl reversed_ex_ids in
+          let pre_last = List.hd rest in
+          let rest = List.tl rest in
+          let base_tuple = Ast.TySta (_loc, pre_last, last) in
+          let tuple = List.fold_left (fun ex_id ex_com -> Ast.TySta (_loc, ex_id, ex_com))  base_tuple rest in
+          Ast.TyTup(_loc,tuple)
+
+        let apply _loc type_type arg_types =
+          let first_type = List.hd arg_types in
+          let rest = List.tl arg_types in
+          let base_application = Ast.TyApp (_loc, type_type, first_type) in
+          List.fold_left (fun arg_type application-> Ast.TyApp (_loc, application, arg_type))  base_application rest
+
+       let create_hashtbl_type _loc type1 type2 =
+	Ast.TyApp (_loc,  (Ast.TyApp (_loc,
+			      (Ast.TyId (_loc,
+				 (Ast.IdAcc (_loc, (Ast.IdUid (_loc, "Hashtbl")),
+				    (Ast.IdLid (_loc, "t")))))),   type1)),
+			   type2)
+     end
 
 
     module ExpressionUtil =
@@ -88,9 +120,9 @@ struct
         let unref _loc expr =
           apply _loc (bang _loc) [expr;]
 
-        let create_record_type_from_string_list _loc types =
+        let create_tuple_from_string_list _loc types =
           let () =if List.length types < 2 then
-            Pervasives.invalid_arg "need at least two arguments to create a list"
+            Pervasives.invalid_arg "need at least two arguments to create a tuple"
           in
           let ex_ids = List.map (fun s -> Ast.ExId (_loc, (Ast.IdLid (_loc, s)))) types in
           let reversed_ex_ids = List.rev ex_ids in
@@ -158,16 +190,27 @@ struct
                     (Ast.ExId (_loc, (Ast.IdLid (_loc, "base_assert")))),   (Ast.ExStr (_loc, function_name)))), (Ast.ExId (_loc, (Ast.IdLid (_loc, "expected")))))),
                     (Ast.ExId (_loc,(Ast.IdLid (_loc, function_interaction ))))))))))))))$ >>) all_function_names)
 
-    let create_hashtables_for_arguments _loc function_names =
-      let hashtbls = List.map (fun function_name ->
+    let create_hashtables_for_arguments _loc function_list=
+      let hashtbls = List.map (fun (function_name, arguments_with_return_type) ->
+	let function_arguments = List.rev (List.tl (List.rev arguments_with_return_type)) in
         let hashtbl_create = ExpressionUtil.call_in_module _loc "Hashtbl" "create" in
         let drie = "3" in
         let drie = <:expr< $int:drie$ >> in
         let hashtbl_create = ExpressionUtil.apply _loc hashtbl_create [drie;] in
         let hashtbl_name = function_name^"_hashtbl" in
         let hashtbl_name = PatternUtil.create_pattern _loc hashtbl_name in
-        <:str_item< let $hashtbl_name$ = $exp:hashtbl_create$ >>
-      ) function_names in
+        let argument_tuple = if List.length function_arguments > 1 then
+		 TypeUtil.create_tuple_type_from_string_list _loc function_arguments
+		else
+                 let arg = List.hd function_arguments in
+		 Ast.TyId(_loc, (Ast.IdLid (_loc, arg)))
+	 in
+        let argument_type = Ast.TyId (_loc, (Ast.IdLid (_loc, "int"))) in
+	let hashtbl_type = TypeUtil.create_hashtbl_type _loc argument_type argument_tuple in
+(*        let hashtbl_create = <:expr< $hashtbl_create$ : $hashtbl_type$ >> in*) 
+        let type_constrained_hashtbl = Ast.ExTyc (_loc,hashtbl_create,hashtbl_type) in
+        <:str_item< let $hashtbl_name$ = $exp:type_constrained_hashtbl$  >>
+      ) function_list in
         Ast.stSem_of_list hashtbls
 
     let create_reference_counters _loc function_names =
@@ -196,7 +239,8 @@ struct
       let hashtbl_add_func = ExpressionUtil.call_in_module _loc "Hashtbl" "add" in
       let interactions_unrefed = ExpressionUtil.unref _loc interactions in
 (*      let argument_expressions = List.map (fun arg -> ExpressionUtil.create_simple_expr _loc arg ) arguments_only in*)
-      let hashtbl_add = ExpressionUtil.apply _loc hashtbl_add_func [ExpressionUtil.create_simple_expr _loc hashtbl_name;interactions_unrefed;ExpressionUtil.create_record_type_from_string_list _loc arguments_only] in
+      let aggregated_args = if (List.length arguments_only > 1) then ExpressionUtil.create_tuple_from_string_list _loc arguments_only else ExpressionUtil.create_simple_expr _loc (List.hd arguments_only) in
+      let hashtbl_add = ExpressionUtil.apply _loc hashtbl_add_func [ExpressionUtil.create_simple_expr _loc hashtbl_name;interactions_unrefed;aggregated_args] in
       ExpressionUtil.create_let_expression _loc unit_patt hashtbl_add incrementation_expression
 
     let create_mocked_functions _loc list_of_functions =
@@ -221,7 +265,7 @@ struct
       let base_assert_function = create_base_assert_function _loc in
       let base_incrementation_function = create_base_incrementation_function _loc in
       let reference_counter_str_item = create_reference_counters _loc function_names in
-      let hashtbls_str_item = create_hashtables_for_arguments _loc function_names in
+      let hashtbls_str_item = create_hashtables_for_arguments _loc list_of_function_signatures in
       let assertion_str_item = create_assertions _loc function_names in
       let mocked_functions = create_mocked_functions _loc list_of_function_signatures in
       let body_list = [reference_counter_str_item;hashtbls_str_item;base_assert_function;base_incrementation_function;assertion_str_item;mocked_functions;] in
