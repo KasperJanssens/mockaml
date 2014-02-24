@@ -12,6 +12,16 @@ let function_depending_on_B=
     raise Not_found
   in
   result
+
+let call_func_with_three_args_twice =
+  let arg1_1 = 1 in
+  let arg2_1 = false in
+  let _result1 = B.three_arg_func arg1_1 arg2_1 in
+  let arg1_2 = 2 in
+  let arg2_2 = true in
+  let _result2 = B.three_arg_func arg1_2 arg2_2 in
+  ()
+
 end
 
 
