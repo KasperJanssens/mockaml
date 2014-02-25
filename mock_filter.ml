@@ -147,26 +147,48 @@ struct
           <:patt< $lid:patt$ >>
       end
 
-    let create_base_assert_function _loc =
-    (*  let equals_func =  ExpressionUtil.call_in_module _loc "Eqx" "eq_int" in
-      let expr_s = ExpressionUtil.create_simple_expr _loc "s" in
-      let expr_expected = ExpressionUtil.create_simple_expr _loc "expected" in
-      let expr_interactions = ExpressionUtil.create_simple_expr _loc "interactions" in
-      let equals_func = ExpressionUtil.apply _loc equals_func [expr_s;expr_expected;expr_interactions;] in
+    let create_base_interaction_assert_function _loc =
+      <:str_item< let base_interaction_assert name expected interactions =
+        let s = Printf.sprintf "interactions with %s" name in
+        let msg = Printf.sprintf "%s expected: %d actual: %d" s expected !interactions in
+        OUnit.assert_equal ~msg expected !interactions >>
 
-      let sprintf_func = ExpressionUtil.call_in_module _loc "Printf" "sprintf" in
-      let name= ExpressionUtil.create_simple_expr _loc "name" in
-      let sprintf_string = <:expr< "interactions with %s" >> in
-      let printf_func = ExpressionUtil.apply _loc sprintf_func [sprintf_string;name;] in
+    let create_base_argument_assert_function _loc =
+      <:str_item< let base_argument_assert_function hashtable number expected_arguments =
+        let actual_arguments = Hashtbl.find hashtable number in
+        let msg = Printf.sprintf "arguments are different" in
+        OUnit.assert_equal ~msg expected_arguments actual_arguments >>
 
-      let patt_s = PatternUtil.create_pattern _loc "s" in
-      let expression = ExpressionUtil.create_let_expression _loc patt_s printf_func equals_func in
-      let base_assert = ExpressionUtil.build_function  _loc ["name";"expected";"interactions";] expression in
-      <:str_item< let base_assert = $exp:base_assert$ >>*)
-    <:str_item< let base_assert name expected interactions =
-      let s = Printf.sprintf "interactions with %s" name in
-      let msg = Printf.sprintf "%s expected: %d actual: %d" s expected !interactions in
-      OUnit.assert_equal ~msg expected !interactions >>
+    let create_argument_assertion_functions _loc function_names =
+      Ast.stSem_of_list ( List.map (fun function_name ->
+        let hashtable_name = function_name ^ "_hashtbl" in
+        let assert_func_name = "assert_"^function_name^"_arg" in
+          <:str_item< $(Ast.StVal (_loc, Ast.ReNil,
+            (Ast.BiEq (_loc,
+              (Ast.PaId (_loc,
+                  (Ast.IdLid (_loc,
+                    assert_func_name)))),
+              (Ast.ExFun (_loc,
+                  (Ast.McArr (_loc,
+                    (Ast.PaId (_loc, (Ast.IdLid (_loc, "number")))),
+                    (Ast.ExNil _loc),
+                    (Ast.ExFun (_loc,
+                        (Ast.McArr (_loc,
+                          (Ast.PaId (_loc,
+                              (Ast.IdLid (_loc, "expected_arguments")))),
+                          (Ast.ExNil _loc),
+                          (Ast.ExApp (_loc,
+                              (Ast.ExApp (_loc,
+                                (Ast.ExApp (_loc,
+                                    (Ast.ExId (_loc,
+                                      (Ast.IdLid (_loc, "base_argument_assert_function")))),
+                                    (Ast.ExId (_loc,
+                                      (Ast.IdLid (_loc,
+                                          hashtable_name)))))),
+                                (Ast.ExId (_loc, (Ast.IdLid (_loc, "number")))))),
+                              (Ast.ExId (_loc,
+                                (Ast.IdLid (_loc, "expected_arguments"))))))))))))))))))$ >>
+        ) function_names)
 
 
     let create_base_incrementation_function _loc =
@@ -187,27 +209,27 @@ struct
                 (Ast.PaId (_loc, (Ast.IdLid (_loc, assert_function_name)))),
                   (Ast.ExFun (_loc,  (Ast.McArr (_loc,
                     (Ast.PaId (_loc, (Ast.IdLid (_loc, "expected")))),  (Ast.ExNil _loc), (Ast.ExApp (_loc, (Ast.ExApp (_loc, (Ast.ExApp (_loc,
-                    (Ast.ExId (_loc, (Ast.IdLid (_loc, "base_assert")))),   (Ast.ExStr (_loc, function_name)))), (Ast.ExId (_loc, (Ast.IdLid (_loc, "expected")))))),
+                    (Ast.ExId (_loc, (Ast.IdLid (_loc, "base_interaction_assert")))),   (Ast.ExStr (_loc, function_name)))), (Ast.ExId (_loc, (Ast.IdLid (_loc, "expected")))))),
                     (Ast.ExId (_loc,(Ast.IdLid (_loc, function_interaction ))))))))))))))$ >>) all_function_names)
 
     let create_hashtables_for_arguments _loc function_list=
       let hashtbls = List.map (fun (function_name, arguments_with_return_type) ->
-	let function_arguments = List.rev (List.tl (List.rev arguments_with_return_type)) in
+        let function_arguments = List.rev (List.tl (List.rev arguments_with_return_type)) in
         let hashtbl_create = ExpressionUtil.call_in_module _loc "Hashtbl" "create" in
         let drie = "3" in
         let drie = <:expr< $int:drie$ >> in
         let hashtbl_create = ExpressionUtil.apply _loc hashtbl_create [drie;] in
         let hashtbl_name = function_name^"_hashtbl" in
         let hashtbl_name = PatternUtil.create_pattern _loc hashtbl_name in
-        let argument_tuple = if List.length function_arguments > 1 then
-		 TypeUtil.create_tuple_type_from_string_list _loc function_arguments
-		else
-                 let arg = List.hd function_arguments in
-		 Ast.TyId(_loc, (Ast.IdLid (_loc, arg)))
-	 in
+        let argument_tuple =
+          if List.length function_arguments > 1 then
+            TypeUtil.create_tuple_type_from_string_list _loc function_arguments
+          else
+            let arg = List.hd function_arguments in
+            Ast.TyId(_loc, (Ast.IdLid (_loc, arg)))
+        in
         let argument_type = Ast.TyId (_loc, (Ast.IdLid (_loc, "int"))) in
-	let hashtbl_type = TypeUtil.create_hashtbl_type _loc argument_type argument_tuple in
-(*        let hashtbl_create = <:expr< $hashtbl_create$ : $hashtbl_type$ >> in*) 
+        let hashtbl_type = TypeUtil.create_hashtbl_type _loc argument_type argument_tuple in
         let type_constrained_hashtbl = Ast.ExTyc (_loc,hashtbl_create,hashtbl_type) in
         <:str_item< let $hashtbl_name$ = $exp:type_constrained_hashtbl$  >>
       ) function_list in
@@ -235,13 +257,12 @@ struct
       let hashtbl_name = name^"_hashtbl" in
       let next_interaction = ExpressionUtil.apply _loc (ExpressionUtil.create_simple_expr _loc "base_incrementation") [interactions;] in
       let unit_patt = PatternUtil.unit_patt _loc in
-      let incrementation_expression = ExpressionUtil.create_let_expression _loc unit_patt next_interaction ret_val in
       let hashtbl_add_func = ExpressionUtil.call_in_module _loc "Hashtbl" "add" in
       let interactions_unrefed = ExpressionUtil.unref _loc interactions in
-(*      let argument_expressions = List.map (fun arg -> ExpressionUtil.create_simple_expr _loc arg ) arguments_only in*)
       let aggregated_args = if (List.length arguments_only > 1) then ExpressionUtil.create_tuple_from_string_list _loc arguments_only else ExpressionUtil.create_simple_expr _loc (List.hd arguments_only) in
       let hashtbl_add = ExpressionUtil.apply _loc hashtbl_add_func [ExpressionUtil.create_simple_expr _loc hashtbl_name;interactions_unrefed;aggregated_args] in
-      ExpressionUtil.create_let_expression _loc unit_patt hashtbl_add incrementation_expression
+      let hashtbl_add_expression = ExpressionUtil.create_let_expression _loc unit_patt hashtbl_add ret_val in
+      ExpressionUtil.create_let_expression _loc unit_patt next_interaction hashtbl_add_expression
 
     let create_mocked_functions _loc list_of_functions =
       let list_of_mock_functions =
@@ -262,13 +283,15 @@ struct
 
     let create_stub_module _loc module_name behaviour_type list_of_function_signatures =
       let function_names = List.map Pervasives.fst list_of_function_signatures in
-      let base_assert_function = create_base_assert_function _loc in
+      let base_interaction_assert_function = create_base_interaction_assert_function _loc in
+      let base_argument_assert_function = create_base_argument_assert_function _loc in
       let base_incrementation_function = create_base_incrementation_function _loc in
+      let argument_assertion_functions = create_argument_assertion_functions _loc function_names in
       let reference_counter_str_item = create_reference_counters _loc function_names in
       let hashtbls_str_item = create_hashtables_for_arguments _loc list_of_function_signatures in
       let assertion_str_item = create_assertions _loc function_names in
       let mocked_functions = create_mocked_functions _loc list_of_function_signatures in
-      let body_list = [reference_counter_str_item;hashtbls_str_item;base_assert_function;base_incrementation_function;assertion_str_item;mocked_functions;] in
+      let body_list = [reference_counter_str_item;hashtbls_str_item;base_interaction_assert_function;base_argument_assert_function;base_incrementation_function;argument_assertion_functions;assertion_str_item;mocked_functions;] in
       let functor_module_name = "Behaviour" in
       let name = "TestStubFunctorBehaviourSig" in
       let module_expr = <:module_expr< functor ( $functor_module_name$ : $uid:name$ ) -> struct $list:body_list$ end >> in
